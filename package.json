@@ -30,7 +30,8 @@
     "email": "cesium-dev@googlegroups.com"
   },
   "dependencies": {
-    "requirejs": "^2.3.2"
+    "requirejs": "^2.3.2",
+    "websocket": "^1.0.25"
   },
   "devDependencies": {
     "almond": "^0.3.3",

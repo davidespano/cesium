@@ -6,6 +6,18 @@
     var fs = require('fs');
     var url = require('url');
     var request = require('request');
+    var udp = require('dgram');
+    var debug = true;
+    var WebSocketServer = require('websocket').server;
+
+    Math.degrees = function(radians) {
+        return radians * 180 / Math.PI;
+    };
+
+    // receives updates from paparazzi simulation
+    var udpServer = udp.createSocket('udp4');
+
+
 
     var gzipHeader = Buffer.from('1F8B08', 'hex');
 
@@ -188,14 +200,90 @@
     process.on('SIGINT', function() {
         if (isFirstSig) {
             console.log('Cesium development server shutting down.');
+            udpServer.close();
             server.close(function() {
               process.exit(0);
             });
             isFirstSig = false;
         } else {
+            udpServer.close();
             console.log('Cesium development server force kill.');
             process.exit(1);
         }
     });
 
+    // websocket for receiving updates in cesium
+    var wsServer = new WebSocketServer({
+        httpServer: server
+    });
+
+    var connection;
+    var connected = false;
+
+    wsServer.on('request', function(request) {
+        connection = request.accept(null, request.origin);
+        connected = true;
+        connection.on('message', function(message) {
+            if (message.type === 'utf8') {
+                console.log('Received message: ' + message.utf8Data);
+            }
+        });
+
+        connection.on('close', function(connection) {
+            connected = false;
+        });
+    });
+
+// emits when any error occurs
+    udpServer.on('error', function(error) {
+        console.log('Error: ' + error);
+        udpServer.close();
+    });
+
+// emits on new datagram msg
+    udpServer.on('message', function(msg, info) {
+        console.log('Data received from client : ' );
+
+        // reading native flightgear data as defined in
+        // https://github.com/paparazzi/paparazzi/blob/master/sw/simulator/flight_gear.h
+        var lon = Math.degrees(msg.readDoubleLE(8));
+        var lat = Math.degrees(msg.readDoubleLE(16));
+        var alt = Math.max(msg.readFloatLE(24), 1);
+        var roll = msg.readFloatLE(32);
+        var pitch = msg.readFloatLE(36);
+        var heading = msg.readFloatLE(40);
+        if(connected){
+            connection.sendUTF(JSON.stringify({
+                lon: lon,
+                lat: lat,
+                alt: alt,
+                roll: roll,
+                pitch: pitch,
+                heading: heading
+            }));
+        }
+
+        if(debug){
+            console.log('roll %d heading %d pitch', roll, heading, pitch );
+            console.log('Received %d bytes from %s:%d\n', msg.length, info.address, info.port);
+        }
+    });
+
+//emits when socket is ready and listening for datagram msgs
+    udpServer.on('listening', function() {
+        var address = udpServer.address();
+        var port = address.port;
+        var family = address.family;
+        var ipaddr = address.address;
+        console.log('Server is listening at port ' + port);
+        console.log('Server ip : ' + ipaddr);
+        console.log('Server is IP4/IP6 : ' + family);
+    });
+
+//emits after the socket is closed using socket.close();
+    udpServer.on('close', function() {
+        console.log('Socket is closed !');
+    });
+
+    udpServer.bind(5501);
 })();
